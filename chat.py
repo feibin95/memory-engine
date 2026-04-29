@@ -29,6 +29,20 @@ def write(user_id: str, content: str) -> None:
     requests.post(f"{MEMORY_API}/write", json={"user_id": user_id, "content": content}).raise_for_status()
 
 
+def extract(text: str) -> str | None:
+    resp = client.messages.create(
+        model=MODEL,
+        max_tokens=128,
+        system="""判断用户这句话是否包含值得长期记忆的事实（偏好、习惯、个人信息等）。
+如果有，提取核心事实返回一句话。
+如果没有（问句、闲聊、指令），只返回 null。
+只返回提取结果或 null，不要解释。""",
+        messages=[{"role": "user", "content": text}],
+    )
+    result = resp.content[0].text.strip()
+    return None if result.lower() == "null" else result
+
+
 def build_system(memories: list[str]) -> str:
     if not memories:
         return "你是一个有记忆的助手。"
@@ -64,9 +78,14 @@ def chat(user_id: str, verbose: bool = False) -> None:
         reply = response.content[0].text
         print(f"助手: {reply}\n")
 
-        write(user_id, user_input)
-        if verbose:
-            print(f"[write] 已存入记忆: {user_input!r}\n")
+        fact = extract(user_input)
+        if fact:
+            write(user_id, fact)
+            if verbose:
+                print(f"[write] 已存入记忆: {fact!r}\n")
+        else:
+            if verbose:
+                print(f"[write] 无事实，跳过存储\n")
 
 
 if __name__ == "__main__":
