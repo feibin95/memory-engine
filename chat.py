@@ -43,15 +43,19 @@ def extract(text: str) -> str | None:
     return None if result.lower() == "null" else result
 
 
-def build_system(memories: list[str]) -> str:
+SYSTEM_PROMPT = "你是一个有记忆的助手。"
+
+
+def build_user_message(user_input: str, memories: list[str]) -> str:
     if not memories:
-        return "你是一个有记忆的助手。"
+        return user_input
     mem_text = "\n".join(f"- {m}" for m in memories)
-    return f"你是一个有记忆的助手。\n\n以下是与当前话题相关的记忆：\n{mem_text}"
+    return f"[相关记忆：\n{mem_text}\n]\n\n{user_input}"
 
 
 def chat(user_id: str, verbose: bool = False) -> None:
     print(f"Memory Chat (user: {user_id})，输入 quit 退出\n")
+    messages = []
     while True:
         user_input = input("你: ").strip()
         if not user_input or user_input.lower() == "quit":
@@ -64,18 +68,21 @@ def chat(user_id: str, verbose: bool = False) -> None:
             for m in memories:
                 print(f"  - {m}")
 
-        system = build_system(memories)
+        user_message = build_user_message(user_input, memories)
 
         if verbose:
-            print(f"[system prompt]\n{system}\n")
+            print(f"[user message]\n{user_message}\n")
+
+        messages.append({"role": "user", "content": user_message})
 
         response = client.messages.create(
             model=MODEL,
             max_tokens=1024,
-            system=system,
-            messages=[{"role": "user", "content": user_input}],
+            system=SYSTEM_PROMPT,
+            messages=messages,
         )
         reply = response.content[0].text
+        messages.append({"role": "assistant", "content": reply})
         print(f"助手: {reply}\n")
 
         fact = extract(user_input)
