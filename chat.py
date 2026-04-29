@@ -70,9 +70,6 @@ def chat(user_id: str, verbose: bool = False) -> None:
 
         user_message = build_user_message(user_input, memories)
 
-        if verbose:
-            print(f"[user message]\n{user_message}\n")
-
         messages.append({"role": "user", "content": user_message})
 
         response = client.messages.create(
