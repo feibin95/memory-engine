@@ -1,0 +1,5 @@
+sentence-transformers==3.4.1
+faiss-cpu==1.10.0
+fastapi==0.116.2
+uvicorn==0.35.0
+numpy>=1.26,<3
