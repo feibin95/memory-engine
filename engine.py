@@ -103,7 +103,7 @@ class MemoryEngine:
                     store.update(user_id, d["id"], d["text"])
                     results.append({"event": "UPDATE", "id": d["id"], "text": d["text"]})
                 elif event == "DELETE":
-                    old_text = related_map.get(d["id"], d["id"])
+                    old_text = related_map[d["id"]]
                     store.delete(user_id, d["id"])
                     results.append({"event": "DELETE", "text": old_text})
 
