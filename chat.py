@@ -18,6 +18,8 @@ client = anthropic.Anthropic(
     default_headers={"X-Working-Dir": WORKING_DIR},
 )
 
+SYSTEM_PROMPT = "你是一个有记忆的助手。"
+
 
 def recall(user_id: str, query: str) -> list[str]:
     resp = requests.post(f"{MEMORY_API}/recall", json={"user_id": user_id, "query": query, "top_k": 5})
@@ -25,25 +27,10 @@ def recall(user_id: str, query: str) -> list[str]:
     return [r["content"] for r in resp.json()["results"]]
 
 
-def write(user_id: str, content: str) -> None:
-    requests.post(f"{MEMORY_API}/write", json={"user_id": user_id, "content": content}).raise_for_status()
-
-
-def extract(text: str) -> str | None:
-    resp = client.messages.create(
-        model=MODEL,
-        max_tokens=128,
-        system="""判断用户这句话是否包含值得长期记忆的事实（偏好、习惯、个人信息等）。
-如果有，提取核心事实返回一句话。
-如果没有（问句、闲聊、指令），只返回 null。
-只返回提取结果或 null，不要解释。""",
-        messages=[{"role": "user", "content": text}],
-    )
-    result = resp.content[0].text.strip()
-    return None if result.lower() == "null" else result
-
-
-SYSTEM_PROMPT = "你是一个有记忆的助手。"
+def write(user_id: str, content: str) -> dict:
+    resp = requests.post(f"{MEMORY_API}/write", json={"user_id": user_id, "content": content})
+    resp.raise_for_status()
+    return resp.json()
 
 
 def build_user_message(user_input: str, memories: list[str]) -> str:
@@ -69,7 +56,6 @@ def chat(user_id: str, verbose: bool = False) -> None:
                 print(f"  - {m}")
 
         user_message = build_user_message(user_input, memories)
-
         messages.append({"role": "user", "content": user_message})
 
         response = client.messages.create(
@@ -82,14 +68,15 @@ def chat(user_id: str, verbose: bool = False) -> None:
         messages.append({"role": "assistant", "content": reply})
         print(f"助手: {reply}\n")
 
-        fact = extract(user_input)
-        if fact:
-            write(user_id, fact)
-            if verbose:
-                print(f"[write] 已存入记忆: {fact!r}\n")
-        else:
-            if verbose:
-                print(f"[write] 无事实，跳过存储\n")
+        result = write(user_id, user_input)
+        if verbose:
+            ops = result.get("operations", [])
+            if ops:
+                for op in ops:
+                    print(f"[memory] {op['event']} → {op.get('text', op.get('id', ''))}")
+            else:
+                print(f"[memory] {result.get('status')} {result.get('reason', '')}")
+            print()
 
 
 if __name__ == "__main__":
