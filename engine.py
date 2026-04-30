@@ -93,6 +93,7 @@ class MemoryEngine:
             related = store.search(user_id, fact, top_k=5)
             decisions = _resolve_conflicts(fact, related)
 
+            related_map = {r["id"]: r["content"] for r in related}
             for d in decisions:
                 event = d.get("event")
                 if event == "ADD":
@@ -102,8 +103,9 @@ class MemoryEngine:
                     store.update(user_id, d["id"], d["text"])
                     results.append({"event": "UPDATE", "id": d["id"], "text": d["text"]})
                 elif event == "DELETE":
+                    old_text = related_map.get(d["id"], d["id"])
                     store.delete(user_id, d["id"])
-                    results.append({"event": "DELETE", "id": d["id"]})
+                    results.append({"event": "DELETE", "text": old_text})
 
         return {"status": "ok", "user_id": user_id, "operations": results}
 
