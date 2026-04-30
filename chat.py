@@ -1,4 +1,5 @@
 import os
+import readline  # 使终端 input() 支持中文退格和方向键
 import anthropic
 import requests
 import sys
