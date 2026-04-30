@@ -1,9 +1,11 @@
 import os
-import readline  # 使终端 input() 支持中文退格和方向键
 import anthropic
 import requests
 import sys
 from dotenv import load_dotenv
+from rich.console import Console
+from rich.text import Text
+from prompt_toolkit import prompt
 
 load_dotenv()
 
@@ -19,7 +21,12 @@ client = anthropic.Anthropic(
     default_headers={"X-Working-Dir": WORKING_DIR},
 )
 
+console = Console()
 SYSTEM_PROMPT = "你是一个有记忆的助手。"
+
+
+def dim(text: str) -> None:
+    console.print(Text(text, style="dim"))
 
 
 def recall(user_id: str, query: str) -> list[str]:
@@ -42,19 +49,19 @@ def build_user_message(user_input: str, memories: list[str]) -> str:
 
 
 def chat(user_id: str, verbose: bool = False) -> None:
-    print(f"Memory Chat (user: {user_id})，输入 quit 退出\n")
+    console.print(f"\n[bold]Memory Chat[/bold] (user: {user_id})，输入 quit 退出\n")
     messages = []
     while True:
-        user_input = input("你: ").strip()
+        user_input = prompt("\n>> ").strip()
         if not user_input or user_input.lower() == "quit":
             break
 
         memories = recall(user_id, user_input)
 
         if verbose:
-            print(f"[recall] 召回 {len(memories)} 条记忆:")
+            dim(f"[recall] 召回 {len(memories)} 条记忆:")
             for m in memories:
-                print(f"  - {m}")
+                dim(f"  - {m}")
 
         user_message = build_user_message(user_input, memories)
         messages.append({"role": "user", "content": user_message})
@@ -67,17 +74,18 @@ def chat(user_id: str, verbose: bool = False) -> None:
         )
         reply = response.content[0].text
         messages.append({"role": "assistant", "content": reply})
-        print(f"助手: {reply}\n")
+
+        console.print(f"\n[bold green]助手[/bold green]: {reply}\n")
 
         result = write(user_id, user_input)
         if verbose:
             ops = result.get("operations", [])
             if ops:
                 for op in ops:
-                    print(f"[memory] {op['event']} → {op.get('text', op.get('id', ''))}")
+                    dim(f"[memory] {op['event']} → {op.get('text', op.get('id', ''))}")
             else:
-                print(f"[memory] {result.get('status')} {result.get('reason', '')}")
-            print()
+                dim(f"[memory] {result.get('status')} {result.get('reason', '')}")
+            console.print()
 
 
 if __name__ == "__main__":

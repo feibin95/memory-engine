@@ -6,3 +6,5 @@ numpy>=1.26,<3
 anthropic
 python-dotenv
 requests
+rich
+prompt_toolkit
