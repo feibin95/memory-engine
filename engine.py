@@ -1,4 +1,3 @@
-import json
 import os
 import anthropic
 from dotenv import load_dotenv
@@ -12,42 +11,74 @@ _client = anthropic.Anthropic(
     default_headers={"X-Working-Dir": os.environ["ANTHROPIC_WORKING_DIR"]},
 )
 _MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+MAX_RETRIES = 3
 
 _EXTRACT_PROMPT = """判断对话中是否包含值得长期记忆的事实（偏好、习惯、个人信息、状态等）。
 如果有，提取成独立的事实列表，每条一句话。
-如果没有（问句、闲聊、指令），返回空列表。
-只返回 JSON，格式：{"facts": ["事实1", "事实2"]}，不要解释。"""
+如果没有（问句、闲聊、指令），返回空列表。"""
+
+_EXTRACT_TOOL = {
+    "name": "extract_facts",
+    "description": "提取对话中值得长期记忆的事实，无事实则返回空数组",
+    "strict": True,
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "facts": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "事实列表，无事实则为空数组"
+            }
+        },
+        "required": ["facts"],
+        "additionalProperties": False
+    }
+}
 
 _CONFLICT_PROMPT = """你是一个记忆管理器。
 
-输入格式：
+输入：
 - 已有记忆：若干条，每条有 id 和内容
 - 新事实：一条新的信息
 
-你的任务：
-1. 对每一条已有记忆，判断它与新事实的关系，给出操作
-2. 判断新事实是否需要 ADD 进记忆
-
-操作定义：
-- NONE：已有记忆与新事实无关，保持不变
-- UPDATE：已有记忆与新事实描述同一件事，但新的信息更丰富，合并更新（保留原 ID）
-- DELETE：已有记忆与新事实描述同一类信息但已过时或矛盾（职业变了、城市变了、喜好反转等），删除旧的
-- ADD：新事实是全新信息（id 用 "new"）
-
 规则：
-- 必须对输入中每一条已有记忆都给出决策（NONE/UPDATE/DELETE）
-- 如果新事实需要加入，额外追加一条 id="new" 的 ADD
+- 必须对每一条已有记忆给出决策（NONE/UPDATE/DELETE）
+- NONE：与新事实无关，保持不变
+- UPDATE：描述同一件事但新的更丰富，合并更新（保留原 ID）
+- DELETE：描述同类信息但已过时或矛盾（城市变了、职业变了、喜好反转等）
+- ADD：新事实是全新信息，id 固定用 "new"
 - DELETE + ADD 是常见组合（旧的过时了，新的加进来）
 
 示例：
-输入：
-  已有记忆：- id=abc: 职业是软件工程师
-  新事实：换了工作，现在是数据工程师
+已有记忆：- id=abc: 职业是软件工程师
+新事实：换了工作，现在是数据工程师
+输出：[{id:abc, event:DELETE, text:职业是软件工程师}, {id:new, event:ADD, text:职业是数据工程师}]"""
 
-输出：
-{"memory": [{"id": "abc", "text": "职业是软件工程师", "event": "DELETE"}, {"id": "new", "text": "职业是数据工程师", "event": "ADD"}]}
-
-只返回 JSON，不要解释。"""
+_CONFLICT_TOOL = {
+    "name": "resolve_conflicts",
+    "description": "对每条已有记忆给出决策，并决定新事实是否加入",
+    "strict": True,
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "memory": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id":    {"type": "string", "description": "已有记忆的原始 id，或新增时用 'new'"},
+                        "text":  {"type": "string", "description": "记忆内容"},
+                        "event": {"type": "string", "enum": ["ADD", "UPDATE", "DELETE", "NONE"]}
+                    },
+                    "required": ["id", "text", "event"],
+                    "additionalProperties": False
+                }
+            }
+        },
+        "required": ["memory"],
+        "additionalProperties": False
+    }
+}
 
 
 def _extract_facts(text: str) -> list[str]:
@@ -55,30 +86,54 @@ def _extract_facts(text: str) -> list[str]:
         model=_MODEL,
         max_tokens=256,
         system=_EXTRACT_PROMPT,
+        tools=[_EXTRACT_TOOL],
+        tool_choice={"type": "tool", "name": "extract_facts"},
         messages=[{"role": "user", "content": text}],
     )
-    try:
-        return json.loads(resp.content[0].text).get("facts", [])
-    except Exception:
-        return []
+    for block in resp.content:
+        if block.type == "tool_use":
+            return block.input.get("facts", [])
+    return []
 
 
 def _resolve_conflicts(fact: str, related: list[dict]) -> list[dict]:
     if not related:
         return [{"id": "new", "text": fact, "event": "ADD"}]
 
-    existing_str = "\n".join(f'- id={r["id"]}: {r["content"]}' for r in related)
-    prompt = f"已有记忆：\n{existing_str}\n\n新事实：{fact}\n\n请对每条已有记忆给出 NONE/UPDATE/DELETE 决策，并决定新事实是否需要 ADD。"
-    resp = _client.messages.create(
-        model=_MODEL,
-        max_tokens=512,
-        system=_CONFLICT_PROMPT,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    try:
-        return json.loads(resp.content[0].text).get("memory", [])
-    except Exception:
-        return [{"id": "new", "text": fact, "event": "ADD"}]
+    required_ids = {r["id"] for r in related}
+    hint = ""
+
+    for attempt in range(MAX_RETRIES):
+        existing_str = "\n".join(f'- id={r["id"]}: {r["content"]}' for r in related)
+        user_content = f"已有记忆：\n{existing_str}\n\n新事实：{fact}"
+        if hint:
+            user_content += f"\n\n注意：{hint}"
+
+        resp = _client.messages.create(
+            model=_MODEL,
+            max_tokens=512,
+            system=_CONFLICT_PROMPT,
+            tools=[_CONFLICT_TOOL],
+            tool_choice={"type": "tool", "name": "resolve_conflicts"},
+            messages=[{"role": "user", "content": user_content}],
+        )
+
+        decisions = []
+        for block in resp.content:
+            if block.type == "tool_use":
+                decisions = block.input.get("memory", [])
+                break
+
+        returned_ids = {d["id"] for d in decisions if d["id"] != "new"}
+        missing = required_ids - returned_ids
+
+        if not missing:
+            return decisions
+
+        hint = f"上次漏掉了这些 id 的决策：{missing}，必须对每条已有记忆都给出 NONE/UPDATE/DELETE 决策。"
+
+    # 3 次仍失败，fallback ADD
+    return [{"id": "new", "text": fact, "event": "ADD"}]
 
 
 class MemoryEngine:
