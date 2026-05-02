@@ -1,6 +1,10 @@
+import logging
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 from engine import engine
+
+logging.basicConfig(level=logging.WARNING, format="%(name)s %(levelname)s %(message)s")
+logging.getLogger("engine").setLevel(logging.DEBUG)
 
 app = FastAPI(title="Memory Engine", version="0.1.0")
 

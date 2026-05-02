@@ -1,7 +1,10 @@
 import os
+import logging
 import anthropic
 from dotenv import load_dotenv
 import store
+
+logger = logging.getLogger("engine")
 
 load_dotenv()
 
@@ -92,12 +95,15 @@ def _extract_facts(text: str) -> list[str]:
     )
     for block in resp.content:
         if block.type == "tool_use":
-            return block.input.get("facts", [])
+            facts = block.input.get("facts", [])
+            logger.debug("extract_facts input=%r facts=%r", text, facts)
+            return facts
     return []
 
 
 def _resolve_conflicts(fact: str, related: list[dict]) -> list[dict]:
     if not related:
+        logger.debug("resolve_conflicts fact=%r no related → ADD", fact)
         return [{"id": "new", "text": fact, "event": "ADD"}]
 
     required_ids = {r["id"] for r in related}
@@ -128,11 +134,13 @@ def _resolve_conflicts(fact: str, related: list[dict]) -> list[dict]:
         missing = required_ids - returned_ids
 
         if not missing:
+            logger.debug("resolve_conflicts fact=%r attempt=%d decisions=%r", fact, attempt, decisions)
             return decisions
 
+        logger.warning("resolve_conflicts attempt=%d missing=%r, retrying", attempt, missing)
         hint = f"上次漏掉了这些 id 的决策：{missing}，必须对每条已有记忆都给出 NONE/UPDATE/DELETE 决策。"
 
-    # 3 次仍失败，fallback ADD
+    logger.error("resolve_conflicts failed after %d retries for fact=%r, fallback ADD", MAX_RETRIES, fact)
     return [{"id": "new", "text": fact, "event": "ADD"}]
 
 
@@ -141,11 +149,13 @@ class MemoryEngine:
     def write(self, user_id: str, content: str) -> dict:
         facts = _extract_facts(content)
         if not facts:
+            logger.debug("write user=%r content=%r → skipped", user_id, content)
             return {"status": "skipped", "reason": "no facts"}
 
         results = []
         for fact in facts:
             related = store.search(user_id, fact, top_k=5)
+            logger.debug("write fact=%r related=%r", fact, [r["content"] for r in related])
             decisions = _resolve_conflicts(fact, related)
 
             related_map = {r["id"]: r["content"] for r in related}
@@ -166,6 +176,9 @@ class MemoryEngine:
 
     def recall(self, user_id: str, query: str, top_k: int = 5, threshold: float = 0.0) -> dict:
         results = store.search(user_id, query, top_k, threshold)
+        logger.debug("recall user=%r query=%r threshold=%s results=%r",
+                     user_id, query, threshold,
+                     [(r["content"], round(r["score"], 3)) for r in results])
         return {"user_id": user_id, "query": query, "results": results}
 
     def update(self, user_id: str, memory_id: str, content: str) -> dict:
