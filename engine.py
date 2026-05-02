@@ -155,7 +155,7 @@ class MemoryEngine:
         results = []
         for fact in facts:
             related = store.search(user_id, fact, top_k=5)
-            logger.debug("write fact=%r related=%r", fact, [r["content"] for r in related])
+            logger.debug("write user=%r fact=%r related=%r", user_id, fact, [(r["content"], round(r["score"], 3)) for r in related])
             decisions = _resolve_conflicts(fact, related)
 
             related_map = {r["id"]: r["content"] for r in related}
