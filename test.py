@@ -87,6 +87,22 @@ write(u, "我早上喜欢喝黑咖啡")
 memories = [m["content"] for m in recall(u, "你有宠物吗")["results"]]
 check("宠物问题召回猫相关记忆", any("猫" in m or "小橘" in m for m in memories), str(memories))
 
+print("\n[ 7. Recall threshold 过滤低分记忆 ]")
+u = uid()
+write(u, "我有一只猫叫小橘")
+
+# 完全不相关的查询，score 应该很低，threshold=0.5 应过滤掉
+results_high = requests.post(f"{BASE}/recall", json={
+    "user_id": u, "query": "股票市场今天行情如何", "top_k": 3, "threshold": 0.5
+}).json()["results"]
+check("threshold=0.5 过滤不相关记忆", len(results_high) == 0, str(results_high))
+
+# threshold=0.0 不过滤，应能召回
+results_low = requests.post(f"{BASE}/recall", json={
+    "user_id": u, "query": "你有宠物吗", "top_k": 3, "threshold": 0.0
+}).json()["results"]
+check("threshold=0.0 不过滤，能召回", len(results_low) > 0, str(results_low))
+
 # ── 汇总 ─────────────────────────────────────────────
 
 print(f"\n{'='*40}")

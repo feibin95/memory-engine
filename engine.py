@@ -164,8 +164,8 @@ class MemoryEngine:
 
         return {"status": "ok", "user_id": user_id, "operations": results}
 
-    def recall(self, user_id: str, query: str, top_k: int = 5) -> dict:
-        results = store.search(user_id, query, top_k)
+    def recall(self, user_id: str, query: str, top_k: int = 5, threshold: float = 0.0) -> dict:
+        results = store.search(user_id, query, top_k, threshold)
         return {"user_id": user_id, "query": query, "results": results}
 
     def update(self, user_id: str, memory_id: str, content: str) -> dict:

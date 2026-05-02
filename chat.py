@@ -14,6 +14,7 @@ TOKEN = os.environ["ANTHROPIC_API_KEY"]
 MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 WORKING_DIR = os.environ["ANTHROPIC_WORKING_DIR"]
 MEMORY_API = os.getenv("MEMORY_API_URL", "http://localhost:8000")
+RECALL_THRESHOLD = float(os.getenv("RECALL_THRESHOLD", "0.3"))
 
 client = anthropic.Anthropic(
     base_url=BASE_URL,
@@ -30,7 +31,7 @@ def dim(text: str) -> None:
 
 
 def recall(user_id: str, query: str) -> list[str]:
-    resp = requests.post(f"{MEMORY_API}/recall", json={"user_id": user_id, "query": query, "top_k": 5})
+    resp = requests.post(f"{MEMORY_API}/recall", json={"user_id": user_id, "query": query, "top_k": 5, "threshold": RECALL_THRESHOLD})
     resp.raise_for_status()
     return [r["content"] for r in resp.json()["results"]]
 

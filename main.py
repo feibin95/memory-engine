@@ -14,6 +14,7 @@ class RecallRequest(BaseModel):
     user_id: str = Field(..., min_length=1)
     query: str = Field(..., min_length=1)
     top_k: int = Field(5, ge=1, le=20)
+    threshold: float = Field(0.0, ge=0.0, le=1.0)
 
 
 class MemoryResult(BaseModel):
@@ -34,7 +35,7 @@ def write(req: WriteRequest):
 
 @app.post("/recall", response_model=RecallResponse)
 def recall(req: RecallRequest):
-    return engine.recall(req.user_id, req.query, req.top_k)
+    return engine.recall(req.user_id, req.query, req.top_k, req.threshold)
 
 
 @app.get("/health")

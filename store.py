@@ -73,7 +73,7 @@ def delete(user_id: str, memory_id: str) -> bool:
     return True
 
 
-def search(user_id: str, query: str, top_k: int = 5) -> list[dict]:
+def search(user_id: str, query: str, top_k: int = 5, threshold: float = 0.0) -> list[dict]:
     index, records = _load(user_id)
     if index.ntotal == 0:
         return []
@@ -83,5 +83,5 @@ def search(user_id: str, query: str, top_k: int = 5) -> list[dict]:
     return [
         {"id": records[idx]["id"], "content": records[idx]["content"], "score": float(score)}
         for score, idx in zip(scores[0], indices[0])
-        if idx != -1
+        if idx != -1 and float(score) >= threshold
     ]
