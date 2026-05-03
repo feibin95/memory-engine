@@ -1,5 +1,4 @@
 import json
-import uuid
 import faiss
 import numpy as np
 from pathlib import Path
@@ -16,7 +15,7 @@ def _paths(user_id: str) -> tuple[Path, Path]:
     return DATA_DIR / f"{safe}.faiss", DATA_DIR / f"{safe}.json"
 
 
-def _load(user_id: str) -> tuple[faiss.IndexFlatIP, list[dict]]:
+def _load(user_id: str) -> tuple[faiss.IndexFlatIP, list[str]]:
     idx_path, txt_path = _paths(user_id)
     if idx_path.exists():
         index = faiss.read_index(str(idx_path))
@@ -27,49 +26,44 @@ def _load(user_id: str) -> tuple[faiss.IndexFlatIP, list[dict]]:
     return index, records
 
 
-def _save(user_id: str, index: faiss.IndexFlatIP, records: list[dict]) -> None:
+def _save(user_id: str, index: faiss.IndexFlatIP, records: list[str]) -> None:
     idx_path, txt_path = _paths(user_id)
     faiss.write_index(index, str(idx_path))
     txt_path.write_text(json.dumps(records, ensure_ascii=False), encoding="utf-8")
 
 
-def add(user_id: str, content: str) -> str:
+def add(user_id: str, content: str) -> None:
     index, records = _load(user_id)
-    memory_id = str(uuid.uuid4())[:8]
     vec = embedder.encode([content])
     index.add(vec)
-    records.append({"id": memory_id, "content": content})
+    records.append(content)
     _save(user_id, index, records)
-    return memory_id
 
 
 def update(user_id: str, memory_id: str, new_content: str) -> bool:
     index, records = _load(user_id)
-    for i, rec in enumerate(records):
-        if rec["id"] == memory_id:
-            # 重建 index：更新对应位置的向量
-            all_contents = [r["content"] for r in records]
-            all_contents[i] = new_content
-            new_index = faiss.IndexFlatIP(DIM)
-            vecs = embedder.encode(all_contents)
-            new_index.add(vecs)
-            records[i]["content"] = new_content
-            _save(user_id, new_index, records)
-            return True
-    return False
+    i = int(memory_id)
+    if i < 0 or i >= len(records):
+        return False
+    records[i] = new_content
+    new_index = faiss.IndexFlatIP(DIM)
+    vecs = embedder.encode(records)
+    new_index.add(vecs)
+    _save(user_id, new_index, records)
+    return True
 
 
 def delete(user_id: str, memory_id: str) -> bool:
     index, records = _load(user_id)
-    new_records = [r for r in records if r["id"] != memory_id]
-    if len(new_records) == len(records):
+    i = int(memory_id)
+    if i < 0 or i >= len(records):
         return False
-    # 重建 index
+    records.pop(i)
     new_index = faiss.IndexFlatIP(DIM)
-    if new_records:
-        vecs = embedder.encode([r["content"] for r in new_records])
+    if records:
+        vecs = embedder.encode(records)
         new_index.add(vecs)
-    _save(user_id, new_index, new_records)
+    _save(user_id, new_index, records)
     return True
 
 
@@ -81,7 +75,7 @@ def search(user_id: str, query: str, top_k: int = 5, threshold: float = 0.0) -> 
     k = min(top_k, index.ntotal)
     scores, indices = index.search(vec, k)
     return [
-        {"id": records[idx]["id"], "content": records[idx]["content"], "score": float(score)}
+        {"id": str(idx), "content": records[idx], "score": float(score)}
         for score, idx in zip(scores[0], indices[0])
         if idx != -1 and float(score) >= threshold
     ]
