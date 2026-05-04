@@ -6,6 +6,7 @@ import anthropic
 from dotenv import load_dotenv
 import store
 import embedder
+import history
 
 logger = logging.getLogger("engine")
 
@@ -180,14 +181,17 @@ class MemoryEngine:
             for d in decisions:
                 event = d.get("event")
                 if event == "ADD":
-                    store.add(user_id, d["text"], embedding=embedding_cache.get(d["text"]))
+                    mem_id = store.add(user_id, d["text"], embedding=embedding_cache.get(d["text"]))
+                    history.add_history(mem_id, user_id, None, d["text"], "ADD")
                     results.append({"event": "ADD", "text": d["text"]})
                 elif event == "UPDATE":
                     store.update(user_id, d["id"], d["text"], embedding=embedding_cache.get(d["text"]))
+                    history.add_history(d["id"], user_id, related_map.get(d["id"]), d["text"], "UPDATE")
                     results.append({"event": "UPDATE", "id": d["id"], "text": d["text"]})
                 elif event == "DELETE":
                     old_text = related_map[d["id"]]
                     store.delete(user_id, d["id"])
+                    history.add_history(d["id"], user_id, old_text, None, "DELETE")
                     results.append({"event": "DELETE", "text": old_text})
 
         return {"status": "ok", "user_id": user_id, "operations": results}
@@ -206,6 +210,12 @@ class MemoryEngine:
     def forget(self, user_id: str, memory_id: str) -> dict:
         ok = store.delete(user_id, memory_id)
         return {"status": "ok" if ok else "not_found"}
+
+    def get_history(self, memory_id: str) -> dict:
+        return {"memory_id": memory_id, "history": history.get_history(memory_id)}
+
+    def get_history_by_user(self, user_id: str) -> dict:
+        return {"user_id": user_id, "history": history.get_history_by_user(user_id)}
 
 
 engine = MemoryEngine()
