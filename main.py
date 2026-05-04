@@ -22,6 +22,7 @@ class RecallRequest(BaseModel):
 
 
 class MemoryResult(BaseModel):
+    id: str
     content: str
     score: float
 
@@ -40,6 +41,16 @@ def write(req: WriteRequest):
 @app.post("/recall", response_model=RecallResponse)
 def recall(req: RecallRequest):
     return engine.recall(req.user_id, req.query, req.top_k, req.threshold)
+
+
+@app.get("/history/memory/{memory_id}")
+def history_by_memory(memory_id: str):
+    return engine.get_history(memory_id)
+
+
+@app.get("/history/user/{user_id}")
+def history_by_user(user_id: str):
+    return engine.get_history_by_user(user_id)
 
 
 @app.get("/health")
