@@ -173,7 +173,8 @@ class MemoryEngine:
             for d in decisions:
                 event = d.get("event")
                 if event == "ADD":
-                    store.add(user_id, d["text"], embedding=query_vec)
+                    vec = query_vec if d["text"] == fact else None
+                    store.add(user_id, d["text"], embedding=vec)
                     results.append({"event": "ADD", "text": d["text"]})
                 elif event == "UPDATE":
                     store.update(user_id, d["id"], d["text"])
