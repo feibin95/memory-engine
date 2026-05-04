@@ -1,81 +1,78 @@
-import json
-import faiss
-import numpy as np
+import re
+import uuid
+import chromadb
 from pathlib import Path
 import embedder
 
 DATA_DIR = Path(__file__).parent / "data"
-DATA_DIR.mkdir(exist_ok=True)
+CHROMA_DIR = DATA_DIR / "chroma"
+CHROMA_DIR.mkdir(parents=True, exist_ok=True)
 
-DIM = 512  # bge-small-zh-v1.5 输出维度
-
-
-def _paths(user_id: str) -> tuple[Path, Path]:
-    safe = user_id.replace("/", "_")
-    return DATA_DIR / f"{safe}.faiss", DATA_DIR / f"{safe}.json"
+_client = chromadb.PersistentClient(path=str(CHROMA_DIR))
 
 
-def _load(user_id: str) -> tuple[faiss.IndexFlatIP, list[str]]:
-    idx_path, txt_path = _paths(user_id)
-    if idx_path.exists():
-        index = faiss.read_index(str(idx_path))
-        records = json.loads(txt_path.read_text(encoding="utf-8"))
-    else:
-        index = faiss.IndexFlatIP(DIM)
-        records = []
-    return index, records
+def _get_collection(user_id: str):
+    safe = re.sub(r'[^a-zA-Z0-9_-]', '_', user_id.replace('/', '_'))
+    return _client.get_or_create_collection(
+        name=f"user_{safe}",
+        metadata={"hnsw:space": "cosine"}
+    )
 
 
-def _save(user_id: str, index: faiss.IndexFlatIP, records: list[str]) -> None:
-    idx_path, txt_path = _paths(user_id)
-    faiss.write_index(index, str(idx_path))
-    txt_path.write_text(json.dumps(records, ensure_ascii=False), encoding="utf-8")
-
-
-def add(user_id: str, content: str) -> None:
-    index, records = _load(user_id)
-    vec = embedder.encode([content])
-    index.add(vec)
-    records.append(content)
-    _save(user_id, index, records)
+def add(user_id: str, content: str, embedding=None) -> str:
+    col = _get_collection(user_id)
+    mem_id = str(uuid.uuid4())
+    if embedding is None:
+        embedding = embedder.encode([content])[0]
+    col.add(ids=[mem_id], documents=[content], embeddings=[embedding.tolist()])
+    return mem_id
 
 
 def update(user_id: str, memory_id: str, new_content: str) -> bool:
-    index, records = _load(user_id)
-    i = int(memory_id)
-    if i < 0 or i >= len(records):
+    col = _get_collection(user_id)
+    if not col.get(ids=[memory_id])["ids"]:
         return False
-    records[i] = new_content
-    new_index = faiss.IndexFlatIP(DIM)
-    vecs = embedder.encode(records)
-    new_index.add(vecs)
-    _save(user_id, new_index, records)
+    new_vec = embedder.encode([new_content])[0]
+    col.update(ids=[memory_id], documents=[new_content], embeddings=[new_vec.tolist()])
     return True
 
 
 def delete(user_id: str, memory_id: str) -> bool:
-    index, records = _load(user_id)
-    i = int(memory_id)
-    if i < 0 or i >= len(records):
+    col = _get_collection(user_id)
+    if not col.get(ids=[memory_id])["ids"]:
         return False
-    records.pop(i)
-    new_index = faiss.IndexFlatIP(DIM)
-    if records:
-        vecs = embedder.encode(records)
-        new_index.add(vecs)
-    _save(user_id, new_index, records)
+    col.delete(ids=[memory_id])
     return True
 
 
 def search(user_id: str, query: str, top_k: int = 5, threshold: float = 0.0) -> list[dict]:
-    index, records = _load(user_id)
-    if index.ntotal == 0:
+    col = _get_collection(user_id)
+    count = col.count()
+    if count == 0:
         return []
-    vec = embedder.encode([query])
-    k = min(top_k, index.ntotal)
-    scores, indices = index.search(vec, k)
-    return [
-        {"id": str(idx), "content": records[idx], "score": float(score)}
-        for score, idx in zip(scores[0], indices[0])
-        if idx != -1 and float(score) >= threshold
-    ]
+    k = min(top_k, count)
+    vec = embedder.encode([query])[0]
+    return _query(col, vec, k, threshold)
+
+
+def search_with_vec(user_id: str, query_vec, top_k: int = 5, threshold: float = 0.0) -> list[dict]:
+    col = _get_collection(user_id)
+    count = col.count()
+    if count == 0:
+        return []
+    k = min(top_k, count)
+    return _query(col, query_vec, k, threshold)
+
+
+def _query(col, vec, k: int, threshold: float) -> list[dict]:
+    results = col.query(
+        query_embeddings=[vec.tolist()],
+        n_results=k,
+        include=["documents", "distances"]
+    )
+    output = []
+    for doc_id, doc, dist in zip(results["ids"][0], results["documents"][0], results["distances"][0]):
+        score = 1.0 - dist
+        if score >= threshold:
+            output.append({"id": doc_id, "content": doc, "score": score})
+    return output

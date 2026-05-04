@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 import anthropic
 from dotenv import load_dotenv
 import store
+import embedder
 
 logger = logging.getLogger("engine")
 
@@ -156,22 +157,23 @@ class MemoryEngine:
 
         # 并发：每条 fact 的 search + resolve_conflicts 同时跑
         def process_fact(fact: str):
-            related = store.search(user_id, fact, top_k=5)
+            query_vec = embedder.encode([fact])[0]
+            related = store.search_with_vec(user_id, query_vec, top_k=5)
             logger.debug("write user=%r fact=%r related=%r", user_id, fact, [(r["content"], round(r["score"], 3)) for r in related])
             decisions = _resolve_conflicts(fact, related)
-            return fact, related, decisions
+            return fact, query_vec, related, decisions
 
         with ThreadPoolExecutor() as executor:
             fact_results = list(executor.map(process_fact, facts))
 
         # 串行：store 操作涉及文件读写，不能并发
         results = []
-        for fact, related, decisions in fact_results:
+        for fact, query_vec, related, decisions in fact_results:
             related_map = {r["id"]: r["content"] for r in related}
             for d in decisions:
                 event = d.get("event")
                 if event == "ADD":
-                    store.add(user_id, d["text"])
+                    store.add(user_id, d["text"], embedding=query_vec)
                     results.append({"event": "ADD", "text": d["text"]})
                 elif event == "UPDATE":
                     store.update(user_id, d["id"], d["text"])
