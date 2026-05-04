@@ -109,11 +109,13 @@ def _resolve_conflicts(fact: str, related: list[dict]) -> list[dict]:
         logger.debug("resolve_conflicts fact=%r no related → ADD", fact)
         return [{"id": "new", "text": fact, "event": "ADD"}]
 
-    required_ids = {r["id"] for r in related}
+    # 用整数索引代替 UUID 传给 LLM，防止幻觉出不存在的 UUID
+    idx_to_uuid = {str(i): r["id"] for i, r in enumerate(related)}
+    required_idxs = set(idx_to_uuid.keys())
     hint = ""
 
     for attempt in range(MAX_RETRIES):
-        existing_str = "\n".join(f'- id={r["id"]}: {r["content"]}' for r in related)
+        existing_str = "\n".join(f'- id={i}: {r["content"]}' for i, r in enumerate(related))
         user_content = f"已有记忆：\n{existing_str}\n\n新事实：{fact}"
         if hint:
             user_content += f"\n\n注意：{hint}"
@@ -133,10 +135,14 @@ def _resolve_conflicts(fact: str, related: list[dict]) -> list[dict]:
                 decisions = block.input.get("memory", [])
                 break
 
-        returned_ids = {d["id"] for d in decisions if d["id"] != "new"}
-        missing = required_ids - returned_ids
+        returned_idxs = {d["id"] for d in decisions if d["id"] != "new"}
+        missing = required_idxs - returned_idxs
 
         if not missing:
+            # 把整数索引换回真实 UUID
+            for d in decisions:
+                if d["id"] != "new":
+                    d["id"] = idx_to_uuid[d["id"]]
             logger.debug("resolve_conflicts fact=%r attempt=%d decisions=%r", fact, attempt, decisions)
             return decisions
 
