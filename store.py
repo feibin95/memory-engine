@@ -28,12 +28,13 @@ def add(user_id: str, content: str, embedding=None) -> str:
     return mem_id
 
 
-def update(user_id: str, memory_id: str, new_content: str) -> bool:
+def update(user_id: str, memory_id: str, new_content: str, embedding=None) -> bool:
     col = _get_collection(user_id)
     if not col.get(ids=[memory_id])["ids"]:
         return False
-    new_vec = embedder.encode([new_content])[0]
-    col.update(ids=[memory_id], documents=[new_content], embeddings=[new_vec.tolist()])
+    if embedding is None:
+        embedding = embedder.encode([new_content])[0]
+    col.update(ids=[memory_id], documents=[new_content], embeddings=[embedding.tolist()])
     return True
 
 

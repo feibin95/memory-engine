@@ -173,17 +173,17 @@ class MemoryEngine:
             fact_results = list(executor.map(process_fact, facts))
 
         # 串行：store 操作涉及文件读写，不能并发
+        embedding_cache = {fact: query_vec for fact, query_vec, _, _ in fact_results}
         results = []
         for fact, query_vec, related, decisions in fact_results:
             related_map = {r["id"]: r["content"] for r in related}
             for d in decisions:
                 event = d.get("event")
                 if event == "ADD":
-                    vec = query_vec if d["text"] == fact else None
-                    store.add(user_id, d["text"], embedding=vec)
+                    store.add(user_id, d["text"], embedding=embedding_cache.get(d["text"]))
                     results.append({"event": "ADD", "text": d["text"]})
                 elif event == "UPDATE":
-                    store.update(user_id, d["id"], d["text"])
+                    store.update(user_id, d["id"], d["text"], embedding=embedding_cache.get(d["text"]))
                     results.append({"event": "UPDATE", "id": d["id"], "text": d["text"]})
                 elif event == "DELETE":
                     old_text = related_map[d["id"]]
