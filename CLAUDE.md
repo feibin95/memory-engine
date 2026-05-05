@@ -26,6 +26,14 @@ type 取值：`feat` / `fix` / `refactor` / `chore`
 
 `verify.sh` 会自动重启服务、等待就绪、再跑测试，全部 PASS 才能提交。有 FAIL 必须修复后重新跑。
 
+## GitHub Release
+
+`gh release` 需要走代理，否则 api.github.com 连不上：
+
+```bash
+HTTPS_PROXY=http://127.0.0.1:7897 gh release create ...
+```
+
 ## 敏感信息
 
 代码里不允许出现 token、URL、路径等环境相关的硬编码值。
